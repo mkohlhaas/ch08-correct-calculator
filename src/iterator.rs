@@ -69,88 +69,36 @@ impl<'a> Iterator for ExpressionIterator<'a> {
             // Push children onto the stack for depth-first traversal.
             // as_any().downcast_ref::<T>() downcasts the dyn Expression
             // trait object to a concrete node type to reach its children.
+            //
+            // In case of BinaryOperation and FunctionCall we extend the stack with its arguments.
+            // 'as_any().downcast_ref::<T>()' is idiomatic Rust.
             if let Some(op) = node.as_any().downcast_ref::<BinaryOperation>() {
+                // the dereference-then-borrow pattern (&*) is common when working with Box in Rust.
                 self.stack.push(&*op.right); // dereference-then-borrow pattern for Box
                 self.stack.push(&*op.left);
             } else if let Some(func) = node.as_any().downcast_ref::<FunctionCall>() {
                 self.stack.push(&*func.argument);
             }
-            Some(node)
+            Some(node) // NumberExpression or VariableExpression
         } else {
             None
         }
     }
 }
 
-// Non-recursive approach to collecting expressions
+// Collect nodes of a given type via ExpressionIterator
 pub fn find_constant_nodes(expr: &dyn Expression) -> Vec<Box<dyn Expression>> {
-    let mut result = Vec::new();
-    collect_nodes_by_type(expr, NodeType::Constant, &mut result);
-    result
+    ExpressionIterator::new(expr)
+        .filter(|node| node.as_any().downcast_ref::<NumberExpression>().is_some())
+        .map(|node| node.clone_box())
+        .collect()
 }
 
 pub fn find_variable_nodes(expr: &dyn Expression) -> Vec<Box<dyn Expression>> {
-    let mut result = Vec::new();
-    collect_nodes_by_type(expr, NodeType::Variable, &mut result);
-    result
-}
-
-#[derive(PartialEq, Eq, Clone, Copy)]
-enum NodeType {
-    Constant,
-    Variable,
-}
-
-// Helper function to collect nodes by type without using an iterator
-fn collect_nodes_by_type(
-    expr: &dyn Expression,
-    node_type: NodeType,
-    result: &mut Vec<Box<dyn Expression>>,
-) {
-    if let Some(op) = expr.as_any().downcast_ref::<BinaryOperation>() {
-        // Check if the node matches the criteria
-        match node_type {
-            NodeType::Constant => {
-                if op.as_any().downcast_ref::<NumberExpression>().is_some() {
-                    result.push(op.clone_box());
-                }
-            }
-            NodeType::Variable => {
-                if op.as_any().downcast_ref::<VariableExpression>().is_some() {
-                    result.push(op.clone_box());
-                }
-            }
-        }
-
-        // Process children recursively
-        collect_nodes_by_type(&*op.left, node_type, result);
-        collect_nodes_by_type(&*op.right, node_type, result);
-    } else if let Some(func) = expr.as_any().downcast_ref::<FunctionCall>() {
-        // Check if the node matches the criteria
-        match node_type {
-            NodeType::Constant => {
-                if func.as_any().downcast_ref::<NumberExpression>().is_some() {
-                    result.push(func.clone_box());
-                }
-            }
-            NodeType::Variable => {
-                if func.as_any().downcast_ref::<VariableExpression>().is_some() {
-                    result.push(func.clone_box());
-                }
-            }
-        }
-
-        // Process argument recursively
-        collect_nodes_by_type(&*func.argument, node_type, result);
-    } else if let Some(num) = expr.as_any().downcast_ref::<NumberExpression>() {
-        if node_type == NodeType::Constant {
-            result.push(num.clone_box());
-        }
-    } else if let Some(var) = expr.as_any().downcast_ref::<VariableExpression>()
-        && node_type == NodeType::Variable
-    {
-        result.push(var.clone_box());
-    }
+    ExpressionIterator::new(expr)
+        .filter(|node| node.as_any().downcast_ref::<VariableExpression>().is_some())
+        .map(|node| node.clone_box())
+        .collect()
 }
 
 #[cfg(test)]
@@ -290,10 +238,7 @@ mod tests {
 
         // Root first, then the left subtree before the right (stack pushes right first).
         // to_string adds precedence parentheses around leaf operands.
-        assert_eq!(
-            visited,
-            vec!["(1) + (2) * (3)", "1", "(2) * (3)", "2", "3"]
-        );
+        assert_eq!(visited, vec!["(1) + (2) * (3)", "1", "(2) * (3)", "2", "3"]);
     }
 
     #[test]
@@ -362,7 +307,10 @@ mod tests {
         assert_eq!(ExpressionIterator::new(&*number).count(), 1);
         assert_eq!(ExpressionIterator::new(&*variable).count(), 1);
         assert_eq!(
-            ExpressionIterator::new(&*variable).next().unwrap().to_string(),
+            ExpressionIterator::new(&*variable)
+                .next()
+                .unwrap()
+                .to_string(),
             "x"
         );
     }
