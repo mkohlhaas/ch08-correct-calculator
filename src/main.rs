@@ -28,26 +28,26 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use bridge::ConsoleDisplay;
-use chain::create_input_chain;
-use command::{ClearVariablesCommand, CommandProcessor, SetVariableCommand};
+use chain::{create_input_chain, InputHandler};
+use command::{Calculation, ClearVariablesCommand, CommandProcessor, SetVariableCommand};
 
 use memento::{
-    CalculatorMemento, CalculatorStateManager, MementoOriginator, get_angle_mode,
-    get_calculator_state_type, get_number_base,
+    CalculatorMemento, CalculatorStateManager, MementoOriginator, create_state_from_memento,
+    get_angle_mode, get_calculator_state_type, get_number_base,
 };
 use observer::{
     CalculatorEvent, DisplayObserver, LoggerObserver, ObservableCalculator, Observer, Subject,
     VariableProvider,
 };
 use parser::ExpressionParser;
-use state::{CalculatorState, StandardMode, StateCalculator};
+use state::{CalculatorState, ProgrammerMode, ScientificMode, StandardMode, StateCalculator};
 use visitor::{optimize_expression, validate_expression};
 
 // Complete calculator that combines all patterns
 struct CorrectCalculator {
     // Chapter 7 patterns
     command_processor: CommandProcessor,
-    input_chain: Box<dyn chain::InputHandler>,
+    input_chain: Box<dyn InputHandler>,
 
     // Chapter 8 patterns
     state: Box<dyn CalculatorState>,
@@ -176,11 +176,11 @@ impl CorrectCalculator {
                         self.notify(&CalculatorEvent::ModeChanged("Standard".to_string()));
                     }
                     "scientific" => {
-                        self.state = Box::new(state::ScientificMode::new());
+                        self.state = Box::new(ScientificMode::new());
                         self.notify(&CalculatorEvent::ModeChanged("Scientific".to_string()));
                     }
                     "programmer" => {
-                        self.state = Box::new(state::ProgrammerMode::new());
+                        self.state = Box::new(ProgrammerMode::new());
                         self.notify(&CalculatorEvent::ModeChanged("Programmer".to_string()));
                     }
                     _ => return Err(format!("Unknown mode: {}", parts[1])),
@@ -382,7 +382,7 @@ impl MementoOriginator for CorrectCalculator {
         self.command_processor.get_calculator_mut().history = memento.history.clone();
 
         // Restore state
-        self.state = memento::create_state_from_memento(memento);
+        self.state = create_state_from_memento(memento);
 
         Ok(())
     }
@@ -475,7 +475,7 @@ fn run_with_memento() {
                     .results_history
                     .clone()
                     .into_iter()
-                    .map(|(expr, result)| command::Calculation {
+                    .map(|(expr, result)| Calculation {
                         expression: expr,
                         result,
                         timestamp: std::time::SystemTime::now(),
@@ -498,7 +498,7 @@ fn run_with_memento() {
                         .iter()
                         .map(|calc| (calc.expression.clone(), calc.result))
                         .collect();
-                    calculator.state = memento::create_state_from_memento(&memento);
+                    calculator.state = create_state_from_memento(&memento);
                     println!("State '{}' restored", name);
                 }
                 Err(e) => println!("Error: {}", e),
