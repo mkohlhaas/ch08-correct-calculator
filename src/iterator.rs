@@ -61,109 +61,24 @@ impl<'a> ExpressionIterator<'a> {
     }
 }
 
-// Code does not work!!!
-
-// Google AI:
-//
-// Trait Object Method Dispatch: ExpressionIterator calls node.as_binary_op(). However, as_binary_op
-// is implemented for dyn Expression to always return None. The overridden methods on concrete
-// structs like BinaryOperation are completely bypassed when using a trait object (&dyn Expression),
-// because Rust does not support structural downcasting or automatic virtual dispatch for extension
-// traits this way.
-
-// Google AI advices to use the visitor pattern.
-
 impl<'a> Iterator for ExpressionIterator<'a> {
     type Item = &'a dyn Expression;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(node) = self.stack.pop() {
-            // NOTE: Wrong!
-            // Push children onto stack for depth-first traversal
-            // as_binary_op() is a downcast method on Expression that
-            // returns Some(&BinaryOperation) if the expression is a
-            // binary operation, or None otherwise. as_function() works
-            // similarly for FunctionCall.
-            if let Some(op) = node.as_binary_op() {
+            // Push children onto the stack for depth-first traversal.
+            // as_any().downcast_ref::<T>() downcasts the dyn Expression
+            // trait object to a concrete node type to reach its children.
+            if let Some(op) = node.as_any().downcast_ref::<BinaryOperation>() {
                 self.stack.push(&*op.right); // dereference-then-borrow pattern for Box
                 self.stack.push(&*op.left);
-            } else if let Some(func) = node.as_function() {
+            } else if let Some(func) = node.as_any().downcast_ref::<FunctionCall>() {
                 self.stack.push(&*func.argument);
             }
             Some(node)
         } else {
             None
         }
-    }
-}
-
-// Downcasting and Safety
-//
-// The code relies on safe downcasting patterns (as_binary_op, as_function).
-// This is a common workaround in Rust because standard trait objects do not natively support
-// downcasting without explicit helper methods or the use of Any.
-
-// Extension trait for expression tree traversal
-pub trait ExpressionExt {
-    fn as_binary_op(&self) -> Option<&BinaryOperation> {
-        None
-    }
-    fn as_number(&self) -> Option<&NumberExpression> {
-        None
-    }
-    fn as_variable(&self) -> Option<&VariableExpression> {
-        None
-    }
-    fn as_function(&self) -> Option<&FunctionCall> {
-        None
-    }
-    fn is_constant(&self) -> bool {
-        self.as_number().is_some()
-    }
-}
-
-// NOTE: that was the change `+ 'a`
-// But the other implementations won't be called!
-impl<'a> ExpressionExt for dyn Expression + 'a {
-    fn as_binary_op(&self) -> Option<&BinaryOperation> {
-        None
-    }
-    fn as_number(&self) -> Option<&NumberExpression> {
-        None
-    }
-    fn as_variable(&self) -> Option<&VariableExpression> {
-        None
-    }
-    fn as_function(&self) -> Option<&FunctionCall> {
-        None
-    }
-}
-
-// NOTE: These functions will never be called.
-impl ExpressionExt for BinaryOperation {
-    fn as_binary_op(&self) -> Option<&BinaryOperation> {
-        Some(self)
-    }
-}
-
-impl ExpressionExt for NumberExpression {
-    fn as_number(&self) -> Option<&NumberExpression> {
-        Some(self)
-    }
-    fn is_constant(&self) -> bool {
-        true
-    }
-}
-
-impl ExpressionExt for VariableExpression {
-    fn as_variable(&self) -> Option<&VariableExpression> {
-        Some(self)
-    }
-}
-
-impl ExpressionExt for FunctionCall {
-    fn as_function(&self) -> Option<&FunctionCall> {
-        Some(self)
     }
 }
 
@@ -196,12 +111,12 @@ fn collect_nodes_by_type(
         // Check if the node matches the criteria
         match node_type {
             NodeType::Constant => {
-                if op.is_constant() {
+                if op.as_any().downcast_ref::<NumberExpression>().is_some() {
                     result.push(op.clone_box());
                 }
             }
             NodeType::Variable => {
-                if op.as_variable().is_some() {
+                if op.as_any().downcast_ref::<VariableExpression>().is_some() {
                     result.push(op.clone_box());
                 }
             }
@@ -214,12 +129,12 @@ fn collect_nodes_by_type(
         // Check if the node matches the criteria
         match node_type {
             NodeType::Constant => {
-                if func.is_constant() {
+                if func.as_any().downcast_ref::<NumberExpression>().is_some() {
                     result.push(func.clone_box());
                 }
             }
             NodeType::Variable => {
-                if func.as_variable().is_some() {
+                if func.as_any().downcast_ref::<VariableExpression>().is_some() {
                     result.push(func.clone_box());
                 }
             }
@@ -243,7 +158,6 @@ mod tests {
     use super::*;
     use crate::expression::Expression;
     use crate::parser::ExpressionParser;
-    use crate::token::Operator;
 
     fn parse(expression: &str) -> Box<dyn Expression> {
         ExpressionParser::new().parse(expression).unwrap()
@@ -348,48 +262,118 @@ mod tests {
     }
 
     #[test]
-    fn expression_ext_classifies_concrete_types() {
-        let number = NumberExpression::new(5.0);
-        assert!(number.is_constant());
-        assert!(number.as_number().is_some());
-        assert!(number.as_variable().is_none());
-
-        let variable = VariableExpression::new("pi");
-        assert!(!variable.is_constant());
-        assert!(variable.as_variable().is_some());
-
-        let op = BinaryOperation::new(
-            Box::new(NumberExpression::new(1.0)),
-            Box::new(NumberExpression::new(2.0)),
-            Operator::Add,
-        );
-        assert!(op.as_binary_op().is_some());
-        assert!(op.as_number().is_none());
-        assert!(!op.is_constant());
-
-        let function = FunctionCall::new(
-            crate::token::Function::Sqrt,
-            Box::new(NumberExpression::new(4.0)),
-        );
-        assert!(function.as_function().is_some());
-    }
-
-    #[test]
-    fn expression_ext_trait_object_dispatch_returns_none() {
-        // Documented limitation: calling the extension methods through a
-        // `dyn Expression` trait object hits the default impl that always
-        // returns None -- the concrete impls are never reached.
-        let op = parse("2 * 3");
-        let dyn_op: &dyn Expression = &*op;
-        assert!(dyn_op.as_binary_op().is_none());
-        assert!(dyn_op.as_number().is_none());
-    }
-
-    #[test]
-    fn expression_iterator_yields_at_least_the_root() {
+    fn expression_iterator_traverses_binary_tree() {
         let expression = parse("1 + 2");
         let visited: Vec<&dyn Expression> = ExpressionIterator::new(&*expression).collect();
-        assert!(!visited.is_empty());
+
+        // Root BinaryOperation plus two NumberExpression leaves
+        assert_eq!(visited.len(), 3);
         assert_eq!(visited[0].to_string(), expression.to_string());
+    }
+
+    #[test]
+    fn expression_iterator_traverses_function_call_and_nested_binary() {
+        let expression = parse("sqrt ( 1 + 2 )");
+        let visited: Vec<&dyn Expression> = ExpressionIterator::new(&*expression).collect();
+
+        // FunctionCall root, nested BinaryOperation, and two NumberExpression leaves
+        assert_eq!(visited.len(), 4);
+        assert_eq!(visited[0].to_string(), expression.to_string());
+    }
+
+    #[test]
+    fn expression_iterator_yields_pre_order_sequence() {
+        let expression = parse("1 + 2 * 3");
+        let visited: Vec<String> = ExpressionIterator::new(&*expression)
+            .map(|node| node.to_string())
+            .collect();
+
+        // Root first, then the left subtree before the right (stack pushes right first).
+        // to_string adds precedence parentheses around leaf operands.
+        assert_eq!(
+            visited,
+            vec!["(1) + (2) * (3)", "1", "(2) * (3)", "2", "3"]
+        );
+    }
+
+    #[test]
+    fn expression_iterator_traverses_nested_function_argument() {
+        let expression = parse("sqrt ( x + ( y * 2 ) )");
+        let visited: Vec<String> = ExpressionIterator::new(&*expression)
+            .map(|node| node.to_string())
+            .collect();
+
+        assert_eq!(
+            visited,
+            vec![
+                "sqrt((x) + (y) * (2))",
+                "(x) + (y) * (2)",
+                "x",
+                "(y) * (2)",
+                "y",
+                "2"
+            ]
+        );
+    }
+
+    #[test]
+    fn expression_iterator_visits_all_expression_types() {
+        let expression = parse("sin ( x ) + cos ( 5 ) + sqrt ( 4 ) * 2");
+        let visited: Vec<&dyn Expression> = ExpressionIterator::new(&*expression).collect();
+
+        let mut binary_ops = 0;
+        let mut functions = 0;
+        let mut numbers = 0;
+        let mut variables = 0;
+
+        for node in visited {
+            if node.as_any().downcast_ref::<BinaryOperation>().is_some() {
+                binary_ops += 1;
+            } else if node.as_any().downcast_ref::<FunctionCall>().is_some() {
+                functions += 1;
+            } else if node.as_any().downcast_ref::<NumberExpression>().is_some() {
+                numbers += 1;
+            } else if node.as_any().downcast_ref::<VariableExpression>().is_some() {
+                variables += 1;
+            }
+        }
+
+        assert_eq!(binary_ops, 3);
+        assert_eq!(functions, 3);
+        assert_eq!(numbers, 3);
+        assert_eq!(variables, 1);
+    }
+
+    #[test]
+    fn expression_iterator_matches_recursive_node_count() {
+        // The iterator is non-recursive, so cross-check it against a simple
+        // recursive walk of the same tree.
+        let expression = parse("x + 2 * ( 3 - sqrt ( 4 ) ) / 8");
+        let visited: Vec<&dyn Expression> = ExpressionIterator::new(&*expression).collect();
+
+        assert_eq!(visited.len(), count_subtrees(&*expression));
+    }
+
+    #[test]
+    fn expression_iterator_handles_single_terminals() {
+        let number = parse("42");
+        let variable = parse("x");
+
+        assert_eq!(ExpressionIterator::new(&*number).count(), 1);
+        assert_eq!(ExpressionIterator::new(&*variable).count(), 1);
+        assert_eq!(
+            ExpressionIterator::new(&*variable).next().unwrap().to_string(),
+            "x"
+        );
+    }
+
+    fn count_subtrees(expr: &dyn Expression) -> usize {
+        if let Some(op) = expr.as_any().downcast_ref::<BinaryOperation>() {
+            1 + count_subtrees(&*op.left) + count_subtrees(&*op.right)
+        } else if let Some(func) = expr.as_any().downcast_ref::<FunctionCall>() {
+            1 + count_subtrees(&*func.argument)
+        } else {
+            1
+        }
     }
 }
