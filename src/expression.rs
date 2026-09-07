@@ -18,6 +18,33 @@ pub trait Expression: Send + Sync {
     // This is also/already defined in the Visitable trait.
     fn as_any(&self) -> &dyn Any;
 
+    // Typed downcast helpers built on as_any() so they dispatch correctly
+    // through the dyn Expression vtable.
+    fn as_number(&self) -> Option<&NumberExpression> {
+        self.as_any().downcast_ref::<NumberExpression>()
+    }
+    fn as_variable(&self) -> Option<&VariableExpression> {
+        self.as_any().downcast_ref::<VariableExpression>()
+    }
+    fn as_binary_op(&self) -> Option<&BinaryOperation> {
+        self.as_any().downcast_ref::<BinaryOperation>()
+    }
+    fn as_function(&self) -> Option<&FunctionCall> {
+        self.as_any().downcast_ref::<FunctionCall>()
+    }
+    fn is_number(&self) -> bool {
+        self.as_number().is_some()
+    }
+    fn is_variable(&self) -> bool {
+        self.as_variable().is_some()
+    }
+    fn is_binary_op(&self) -> bool {
+        self.as_binary_op().is_some()
+    }
+    fn is_function(&self) -> bool {
+        self.as_function().is_some()
+    }
+
     // Default implementation for cloning
     fn clone_box(&self) -> Box<dyn Expression>;
 }

@@ -2,9 +2,7 @@
 
 // Several iterators for history, reverse history and variables
 
-use crate::expression::{
-    BinaryOperation, Expression, FunctionCall, NumberExpression, VariableExpression,
-};
+use crate::expression::Expression;
 use std::collections::HashMap;
 
 // =================== //
@@ -51,7 +49,7 @@ impl<'a> Iterator for VariablesIterator<'a> {
 // Traversing expression trees //
 // =========================== //
 
-struct ExpressionIterator<'a> {
+pub struct ExpressionIterator<'a> {
     stack: Vec<&'a dyn Expression>,
 }
 impl<'a> ExpressionIterator<'a> {
@@ -67,16 +65,12 @@ impl<'a> Iterator for ExpressionIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         if let Some(node) = self.stack.pop() {
             // Push children onto the stack for depth-first traversal.
-            // as_any().downcast_ref::<T>() downcasts the dyn Expression
-            // trait object to a concrete node type to reach its children.
-            //
-            // In case of BinaryOperation and FunctionCall we extend the stack with its arguments.
-            // 'as_any().downcast_ref::<T>()' is idiomatic Rust.
-            if let Some(op) = node.as_any().downcast_ref::<BinaryOperation>() {
-                // the dereference-then-borrow pattern (&*) is common when working with Box in Rust.
+            // as_binary_op()/as_function() downcast the trait object via
+            // as_any() to reach the children of composite nodes.
+            if let Some(op) = node.as_binary_op() {
                 self.stack.push(&*op.right); // dereference-then-borrow pattern for Box
                 self.stack.push(&*op.left);
-            } else if let Some(func) = node.as_any().downcast_ref::<FunctionCall>() {
+            } else if let Some(func) = node.as_function() {
                 self.stack.push(&*func.argument);
             }
             Some(node) // NumberExpression or VariableExpression
@@ -86,17 +80,35 @@ impl<'a> Iterator for ExpressionIterator<'a> {
     }
 }
 
+impl<'a> IntoIterator for &'a dyn Expression {
+    type Item = &'a dyn Expression;
+    type IntoIter = ExpressionIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ExpressionIterator::new(self)
+    }
+}
+
+impl<'a> IntoIterator for &'a Box<dyn Expression> {
+    type Item = &'a dyn Expression;
+    type IntoIter = ExpressionIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ExpressionIterator::new(&**self)
+    }
+}
+
 // Collect nodes of a given type via ExpressionIterator
 pub fn find_constant_nodes(expr: &dyn Expression) -> Vec<Box<dyn Expression>> {
-    ExpressionIterator::new(expr)
-        .filter(|node| node.as_any().downcast_ref::<NumberExpression>().is_some())
+    expr.into_iter()
+        .filter(|node| node.is_number())
         .map(|node| node.clone_box())
         .collect()
 }
 
 pub fn find_variable_nodes(expr: &dyn Expression) -> Vec<Box<dyn Expression>> {
-    ExpressionIterator::new(expr)
-        .filter(|node| node.as_any().downcast_ref::<VariableExpression>().is_some())
+    expr.into_iter()
+        .filter(|node| node.is_variable())
         .map(|node| node.clone_box())
         .collect()
 }
@@ -142,12 +154,7 @@ mod tests {
         assert_eq!(constants.len(), 2);
         let mut values: Vec<f64> = constants
             .iter()
-            .map(|node| {
-                node.as_any()
-                    .downcast_ref::<NumberExpression>()
-                    .unwrap()
-                    .value
-            })
+            .map(|node| node.as_number().unwrap().value)
             .collect();
         values.sort_by(f64::total_cmp);
         assert_eq!(values, vec![1.0, 2.0]);
@@ -159,11 +166,7 @@ mod tests {
         let constants = find_constant_nodes(&*expression);
 
         assert_eq!(constants.len(), 1);
-        let value = constants[0]
-            .as_any()
-            .downcast_ref::<NumberExpression>()
-            .unwrap()
-            .value;
+        let value = constants[0].as_number().unwrap().value;
         assert_eq!(value, 42.0);
     }
 
@@ -182,13 +185,7 @@ mod tests {
         assert_eq!(variables.len(), 2);
         let names: Vec<String> = variables
             .iter()
-            .map(|node| {
-                node.as_any()
-                    .downcast_ref::<VariableExpression>()
-                    .unwrap()
-                    .name
-                    .clone()
-            })
+            .map(|node| node.as_variable().unwrap().name.clone())
             .collect();
         assert!(names.contains(&"x".to_string()));
         assert!(names.contains(&"y".to_string()));
@@ -200,12 +197,7 @@ mod tests {
         let variables = find_variable_nodes(&*expression);
 
         assert_eq!(variables.len(), 1);
-        let name = variables[0]
-            .as_any()
-            .downcast_ref::<VariableExpression>()
-            .unwrap()
-            .name
-            .clone();
+        let name = variables[0].as_variable().unwrap().name.clone();
         assert_eq!(name, "x");
     }
 
@@ -272,13 +264,13 @@ mod tests {
         let mut variables = 0;
 
         for node in visited {
-            if node.as_any().downcast_ref::<BinaryOperation>().is_some() {
+            if node.is_binary_op() {
                 binary_ops += 1;
-            } else if node.as_any().downcast_ref::<FunctionCall>().is_some() {
+            } else if node.is_function() {
                 functions += 1;
-            } else if node.as_any().downcast_ref::<NumberExpression>().is_some() {
+            } else if node.is_number() {
                 numbers += 1;
-            } else if node.as_any().downcast_ref::<VariableExpression>().is_some() {
+            } else if node.is_variable() {
                 variables += 1;
             }
         }
@@ -315,10 +307,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn expression_supports_into_iterator() {
+        let expression = parse("1 + x");
+
+        let visited: Vec<String> = (&*expression).into_iter().map(|n| n.to_string()).collect();
+        assert_eq!(visited.len(), 3);
+
+        let mut count = 0;
+        for _node in &*expression {
+            count += 1;
+        }
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn boxed_expression_supports_into_iterator() {
+        let expression = parse("1 + x");
+
+        let visited: Vec<String> = (&expression).into_iter().map(|n| n.to_string()).collect();
+        assert_eq!(visited.len(), 3);
+
+        let mut count = 0;
+        for _node in &expression {
+            count += 1;
+        }
+        assert_eq!(count, 3);
+    }
+
     fn count_subtrees(expr: &dyn Expression) -> usize {
-        if let Some(op) = expr.as_any().downcast_ref::<BinaryOperation>() {
+        if let Some(op) = expr.as_binary_op() {
             1 + count_subtrees(&*op.left) + count_subtrees(&*op.right)
-        } else if let Some(func) = expr.as_any().downcast_ref::<FunctionCall>() {
+        } else if let Some(func) = expr.as_function() {
             1 + count_subtrees(&*func.argument)
         } else {
             1
