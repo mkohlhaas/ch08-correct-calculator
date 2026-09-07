@@ -2,7 +2,6 @@
 
 // Several iterators for history, reverse history and variables
 
-use crate::command::Calculation;
 use crate::expression::Expression;
 use std::collections::HashMap;
 
@@ -10,43 +9,15 @@ use std::collections::HashMap;
 // A. History Iterator //
 // =================== //
 
-// Slices natively iterate via slice.iter(), so this type mainly demonstrates
-// how to implement the DoubleEndedIterator trait: next() walks forward while
-// next_back() walks backward over the same slice.
-pub struct HistoryIterator<'a> {
-    inner: std::slice::Iter<'a, Calculation>,
-}
-
-impl<'a> HistoryIterator<'a> {
-    pub fn new(history: &'a [Calculation]) -> Self {
-        Self {
-            inner: history.iter(),
-        }
-    }
-}
-
-impl<'a> Iterator for HistoryIterator<'a> {
-    type Item = &'a Calculation;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-// DoubleEndedIterator collapses the old HistoryIterator and
-// ReverseHistoryIterator into one iterator: next_back() yields entries
-// newest-first without needing a separate type.
-impl<'a> DoubleEndedIterator for HistoryIterator<'a> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back()
-    }
-}
+// Slices natively iterate via slice.iter(), which already implements
+// DoubleEndedIterator. A custom HistoryIterator is therefore redundant:
+// next() and next_back() are available directly on the slice iterator.
 
 // =========================== //
 // B. Reverse History Iterator //
 // =========================== //
 
-// No separate ReverseHistoryIterator is needed: HistoryIterator implements
+// No separate ReverseHistoryIterator is needed: slice::Iter implements
 // DoubleEndedIterator, so reverse traversal is available via next_back() or
 // the .rev() iterator adapter.
 
@@ -151,65 +122,6 @@ mod tests {
 
     fn parse(expression: &str) -> Box<dyn Expression> {
         ExpressionParser::new().parse(expression).unwrap()
-    }
-
-    fn calc(expression: &str, result: f64) -> Calculation {
-        Calculation {
-            expression: expression.to_string(),
-            result,
-            timestamp: std::time::SystemTime::now(),
-        }
-    }
-
-    #[test]
-    fn history_iterator_yields_entries_in_order() {
-        let history = vec![calc("1", 1.0), calc("2", 2.0), calc("3", 3.0)];
-
-        let results: Vec<f64> = HistoryIterator::new(&history)
-            .map(|entry| entry.result)
-            .collect();
-
-        assert_eq!(results, vec![1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn history_iterator_next_back_yields_reverse_order() {
-        let history = vec![calc("1", 1.0), calc("2", 2.0), calc("3", 3.0)];
-
-        let results: Vec<f64> = HistoryIterator::new(&history)
-            .rev()
-            .map(|entry| entry.result)
-            .collect();
-
-        assert_eq!(results, vec![3.0, 2.0, 1.0]);
-    }
-
-    #[test]
-    fn history_iterator_meets_in_the_middle() {
-        let history = vec![
-            calc("1", 1.0),
-            calc("2", 2.0),
-            calc("3", 3.0),
-            calc("4", 4.0),
-        ];
-
-        let mut iter = HistoryIterator::new(&history);
-
-        assert_eq!(iter.next().unwrap().result, 1.0);
-        assert_eq!(iter.next_back().unwrap().result, 4.0);
-        assert_eq!(iter.next().unwrap().result, 2.0);
-        assert_eq!(iter.next_back().unwrap().result, 3.0);
-        assert!(iter.next().is_none());
-        assert!(iter.next_back().is_none());
-    }
-
-    #[test]
-    fn history_iterator_is_empty_for_empty_history() {
-        let history: Vec<Calculation> = Vec::new();
-
-        let mut iter = HistoryIterator::new(&history);
-        assert!(iter.next().is_none());
-        assert!(iter.next_back().is_none());
     }
 
     #[test]
