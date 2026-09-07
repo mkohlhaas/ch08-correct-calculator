@@ -56,6 +56,15 @@ impl Clone for Box<dyn Expression> {
     }
 }
 
+// ToOwned for trait objects delegates to clone_box
+impl ToOwned for dyn Expression {
+    type Owned = Box<dyn Expression>;
+
+    fn to_owned(&self) -> Self::Owned {
+        self.clone_box()
+    }
+}
+
 // Leaf node for number values
 #[derive(Debug, Clone)]
 pub struct NumberExpression {

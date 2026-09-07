@@ -335,6 +335,13 @@ mod tests {
         assert_eq!(count, 3);
     }
 
+    #[test]
+    fn expression_trait_object_supports_to_owned() {
+        let expression = parse("42");
+        let owned = (&*expression).to_owned();
+        assert_eq!(owned.evaluate(&HashMap::new()).unwrap(), 42.0);
+    }
+
     fn count_subtrees(expr: &dyn Expression) -> usize {
         if let Some(op) = expr.as_binary_op() {
             1 + count_subtrees(&*op.left) + count_subtrees(&*op.right)
