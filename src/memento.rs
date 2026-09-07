@@ -166,3 +166,155 @@ pub fn get_number_base(state: &dyn CalculatorState) -> Option<NumberBase> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{NumberBase, ProgrammerMode, ScientificMode, StandardMode};
+
+    fn sample_memento() -> CalculatorMemento {
+        CalculatorMemento {
+            variables: HashMap::from([("x".to_string(), 42.0)]),
+            history: vec![],
+            mode: CalculatorStateType::Standard,
+            angle_mode: AngleMode::Radians,
+            number_base: None,
+        }
+    }
+
+    #[test]
+    fn state_manager_saves_and_restores() {
+        let mut manager = CalculatorStateManager::new();
+        manager.save_state("test", sample_memento());
+        assert!(manager.has_state("test"));
+
+        let restored = manager.restore_state("test").unwrap();
+        assert_eq!(restored.variables["x"], 42.0);
+        assert_eq!(restored.mode, CalculatorStateType::Standard);
+    }
+
+    #[test]
+    fn state_manager_restore_missing_state_errors() {
+        let manager = CalculatorStateManager::new();
+        match manager.restore_state("missing") {
+            Err(message) => assert!(message.contains("missing")),
+            Ok(_) => panic!("expected an error for a missing state"),
+        }
+    }
+
+    #[test]
+    fn state_manager_lists_saved_states() {
+        let mut manager = CalculatorStateManager::new();
+        manager.save_state("a", sample_memento());
+        manager.save_state("b", sample_memento());
+
+        let mut names = manager.list_saved_states();
+        names.sort();
+        assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn state_manager_list_is_empty_when_nothing_saved() {
+        let manager = CalculatorStateManager::new();
+        assert!(manager.list_saved_states().is_empty());
+    }
+
+    #[test]
+    fn state_manager_deletes_saved_state() {
+        let mut manager = CalculatorStateManager::new();
+        manager.save_state("a", sample_memento());
+        manager.delete_state("a").unwrap();
+        assert!(!manager.has_state("a"));
+    }
+
+    #[test]
+    fn state_manager_delete_missing_state_errors() {
+        let mut manager = CalculatorStateManager::new();
+        assert!(manager.delete_state("missing").is_err());
+    }
+
+    #[test]
+    fn save_state_overwrites_existing() {
+        let mut manager = CalculatorStateManager::new();
+        manager.save_state("a", sample_memento());
+        manager.save_state("a", sample_memento());
+        assert_eq!(manager.list_saved_states().len(), 1);
+    }
+
+    #[test]
+    fn create_state_from_memento_standard() {
+        let state = create_state_from_memento(&sample_memento());
+        assert_eq!(state.name(), "Standard");
+    }
+
+    #[test]
+    fn create_state_from_memento_scientific() {
+        let memento = CalculatorMemento {
+            mode: CalculatorStateType::Scientific,
+            angle_mode: AngleMode::Degrees,
+            ..sample_memento()
+        };
+        let state = create_state_from_memento(&memento);
+        assert_eq!(state.name(), "Scientific");
+        assert_eq!(get_angle_mode(&*state), AngleMode::Degrees);
+    }
+
+    #[test]
+    fn create_state_from_memento_programmer() {
+        let memento = CalculatorMemento {
+            mode: CalculatorStateType::Programmer,
+            number_base: Some(NumberBase::Hexadecimal),
+            ..sample_memento()
+        };
+        let state = create_state_from_memento(&memento);
+        assert_eq!(state.name(), "Programmer");
+        assert_eq!(get_number_base(&*state), Some(NumberBase::Hexadecimal));
+    }
+
+    #[test]
+    fn get_calculator_state_type_classifies_modes() {
+        assert_eq!(
+            get_calculator_state_type(&*Box::new(StandardMode::new())),
+            CalculatorStateType::Standard
+        );
+        assert_eq!(
+            get_calculator_state_type(&*Box::new(ScientificMode::new())),
+            CalculatorStateType::Scientific
+        );
+        assert_eq!(
+            get_calculator_state_type(&*Box::new(ProgrammerMode::new())),
+            CalculatorStateType::Programmer
+        );
+    }
+
+    #[test]
+    fn get_angle_mode_defaults_to_radians_for_non_scientific() {
+        let state = Box::new(StandardMode::new());
+        assert_eq!(get_angle_mode(&*state), AngleMode::Radians);
+    }
+
+    #[test]
+    fn get_angle_mode_detects_degree_mode() {
+        let state = Box::new(ScientificMode {
+            sci_ops: Box::new(crate::adapter::StandardScientificOperations {
+                angle_mode: AngleMode::Degrees,
+            }),
+            angle_mode: AngleMode::Degrees,
+        });
+        assert_eq!(get_angle_mode(&*state), AngleMode::Degrees);
+    }
+
+    #[test]
+    fn get_number_base_is_none_for_non_programmer() {
+        let state = Box::new(StandardMode::new());
+        assert_eq!(get_number_base(&*state), None);
+    }
+
+    #[test]
+    fn get_number_base_detects_programmer_base() {
+        let state = Box::new(ProgrammerMode {
+            base: NumberBase::Binary,
+        });
+        assert_eq!(get_number_base(&*state), Some(NumberBase::Binary));
+    }
+}

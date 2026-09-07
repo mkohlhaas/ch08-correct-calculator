@@ -3,7 +3,7 @@
 use crate::token::NumberFormat;
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AngleMode {
     Degrees,
     Radians,

@@ -293,3 +293,266 @@ impl Subject for ObservableCalculator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::Calculation;
+
+    struct SpyObserver {
+        events: Arc<Mutex<Vec<CalculatorEvent>>>,
+    }
+
+    impl Observer for SpyObserver {
+        fn update(&self, event: &CalculatorEvent) {
+            self.events.lock().unwrap().push(event.clone());
+        }
+    }
+
+    fn calc(result: f64) -> Calculation {
+        Calculation {
+            expression: format!("{}", result),
+            result,
+            timestamp: std::time::SystemTime::now(),
+        }
+    }
+
+    #[test]
+    fn observable_attaches_and_notifies() {
+        let mut observable = ObservableCalculator::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        observable.attach(Box::new(SpyObserver {
+            events: events.clone(),
+        }));
+
+        observable.notify(&CalculatorEvent::ResultCalculated(5.0, "2 + 3".to_string()));
+        observable.notify(&CalculatorEvent::ModeChanged("Standard".to_string()));
+
+        assert_eq!(events.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn observable_detach_stops_notifications() {
+        let mut observable = ObservableCalculator::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let id = observable.attach(Box::new(SpyObserver {
+            events: events.clone(),
+        }));
+        observable.detach(id);
+
+        observable.notify(&CalculatorEvent::Error("boom".to_string()));
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn observable_assigns_unique_observer_ids() {
+        let mut observable = ObservableCalculator::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let id1 = observable.attach(Box::new(SpyObserver {
+            events: events.clone(),
+        }));
+        let id2 = observable.attach(Box::new(SpyObserver {
+            events: events.clone(),
+        }));
+        assert_ne!(id1, id2);
+    }
+
+    // ---------- HistoryObserver ----------
+
+    #[test]
+    fn history_observer_records_events() {
+        let observer = HistoryObserver::new(10);
+        let history = observer.get_history();
+
+        observer.update(&CalculatorEvent::HistoryAdded(calc(1.0)));
+        observer.update(&CalculatorEvent::HistoryAdded(calc(2.0)));
+
+        let history = history.lock().unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].result, 1.0);
+        assert_eq!(history[1].result, 2.0);
+    }
+
+    #[test]
+    fn history_observer_trims_to_max_entries() {
+        let observer = HistoryObserver::new(2);
+        let history = observer.get_history();
+
+        observer.update(&CalculatorEvent::HistoryAdded(calc(1.0)));
+        observer.update(&CalculatorEvent::HistoryAdded(calc(2.0)));
+        observer.update(&CalculatorEvent::HistoryAdded(calc(3.0)));
+
+        let history = history.lock().unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].result, 2.0);
+        assert_eq!(history[1].result, 3.0);
+    }
+
+    #[test]
+    fn history_observer_clears_on_state_restore() {
+        let observer = HistoryObserver::new(10);
+        let history = observer.get_history();
+
+        observer.update(&CalculatorEvent::HistoryAdded(calc(1.0)));
+        observer.update(&CalculatorEvent::StateRestored);
+
+        assert!(history.lock().unwrap().is_empty());
+    }
+
+    // ---------- DisplayObserver ----------
+
+    struct MockDisplay {
+        messages: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl crate::bridge::Display for MockDisplay {
+        fn show_result(&self, result: f64) {
+            self.messages.lock().unwrap().push(format!("result:{}", result));
+        }
+
+        fn show_error(&self, error: &str) {
+            self.messages.lock().unwrap().push(format!("error:{}", error));
+        }
+
+        fn show_expression(&self, expression: &dyn crate::expression::Expression) {
+            self.messages
+                .lock()
+                .unwrap()
+                .push(format!("expr:{}", expression.to_string()));
+        }
+
+        fn show_message(&self, message: &str) {
+            self.messages.lock().unwrap().push(message.to_string());
+        }
+    }
+
+    #[test]
+    fn display_observer_reacts_to_results() {
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let display = Arc::new(Mutex::new(MockDisplay {
+            messages: messages.clone(),
+        }));
+        let observer = DisplayObserver::new(display);
+
+        observer.update(&CalculatorEvent::ResultCalculated(5.0, "2 + 3".to_string()));
+
+        let messages = messages.lock().unwrap();
+        assert_eq!(messages[0], "result:5");
+        assert!(messages[1].contains("2 + 3"));
+    }
+
+    #[test]
+    fn display_observer_reacts_to_errors() {
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let display = Arc::new(Mutex::new(MockDisplay {
+            messages: messages.clone(),
+        }));
+        let observer = DisplayObserver::new(display);
+
+        observer.update(&CalculatorEvent::Error("bad input".to_string()));
+
+        assert_eq!(messages.lock().unwrap()[0], "error:bad input");
+    }
+
+    #[test]
+    fn display_observer_reacts_to_variable_changed() {
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let display = Arc::new(Mutex::new(MockDisplay {
+            messages: messages.clone(),
+        }));
+        let observer = DisplayObserver::new(display);
+
+        observer.update(&CalculatorEvent::VariableChanged("x".to_string(), 7.0));
+
+        assert_eq!(messages.lock().unwrap()[0], "Variable x = 7");
+    }
+
+    // ---------- DependentVariableObserver ----------
+
+    struct MockVariableProvider {
+        variables: HashMap<String, f64>,
+        parser: crate::parser::ExpressionParser,
+    }
+
+    impl VariableProvider for MockVariableProvider {
+        fn get_variable(&self, name: &str) -> Option<f64> {
+            self.variables.get(name).copied()
+        }
+
+        fn set_variable(&mut self, name: &str, value: f64) {
+            self.variables.insert(name.to_string(), value);
+        }
+
+        fn evaluate_expression(&mut self, expression: &str) -> Result<f64, String> {
+            let tree = self.parser.parse(expression)?;
+            tree.evaluate(&self.variables)
+        }
+    }
+
+    fn mock_provider() -> Arc<Mutex<MockVariableProvider>> {
+        Arc::new(Mutex::new(MockVariableProvider {
+            variables: HashMap::new(),
+            parser: crate::parser::ExpressionParser::new(),
+        }))
+    }
+
+    #[test]
+    fn dependent_variable_observer_recalculates() {
+        let provider = mock_provider();
+        provider.lock().unwrap().set_variable("x", 5.0);
+        let mut observer = DependentVariableObserver::new(provider.clone());
+        observer.add_dependency("x", "y", "x + 1");
+
+        observer.update(&CalculatorEvent::VariableChanged("x".to_string(), 5.0));
+
+        assert_eq!(provider.lock().unwrap().get_variable("y"), Some(6.0));
+    }
+
+    #[test]
+    fn dependent_variable_observer_removed_dependency_ignored() {
+        let provider = mock_provider();
+        let mut observer = DependentVariableObserver::new(provider.clone());
+        observer.add_dependency("x", "y", "x + 1");
+        observer.remove_dependency("x", "y");
+
+        observer.update(&CalculatorEvent::VariableChanged("x".to_string(), 5.0));
+
+        assert_eq!(provider.lock().unwrap().get_variable("y"), None);
+    }
+
+    #[test]
+    fn dependent_variable_observer_ignores_unrelated_events() {
+        let provider = mock_provider();
+        let mut observer = DependentVariableObserver::new(provider.clone());
+        observer.add_dependency("x", "y", "x + 1");
+
+        observer.update(&CalculatorEvent::VariableChanged("z".to_string(), 5.0));
+
+        assert_eq!(provider.lock().unwrap().get_variable("y"), None);
+    }
+
+    #[test]
+    fn dependent_variable_observer_recalculates_on_restore() {
+        let provider = mock_provider();
+        provider.lock().unwrap().set_variable("x", 3.0);
+        let mut observer = DependentVariableObserver::new(provider.clone());
+        observer.add_dependency("x", "y", "x * 2");
+
+        observer.update(&CalculatorEvent::StateRestored);
+
+        assert_eq!(provider.lock().unwrap().get_variable("y"), Some(6.0));
+    }
+
+    // ---------- LoggerObserver ----------
+
+    #[test]
+    fn logger_observer_handles_all_event_kinds() {
+        let observer = LoggerObserver;
+        observer.update(&CalculatorEvent::ResultCalculated(1.0, "1".to_string()));
+        observer.update(&CalculatorEvent::VariableChanged("x".to_string(), 2.0));
+        observer.update(&CalculatorEvent::ModeChanged("Scientific".to_string()));
+        observer.update(&CalculatorEvent::HistoryAdded(calc(3.0)));
+        observer.update(&CalculatorEvent::StateRestored);
+        observer.update(&CalculatorEvent::Error("error".to_string()));
+    }
+}

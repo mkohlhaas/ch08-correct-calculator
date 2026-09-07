@@ -701,3 +701,271 @@ fn match_programmer_input(
         Ok(Some(result))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::StandardScientificOperations;
+    use crate::config::AngleMode;
+
+    // ---------- StateCalculator context ----------
+
+    #[test]
+    fn new_calculator_starts_in_standard_mode() {
+        let calculator = StateCalculator::new();
+        assert_eq!(calculator.state.name(), "Standard");
+        assert_eq!(calculator.display_prompt(), "[Standard] >");
+    }
+
+    #[test]
+    fn standard_mode_evaluates_expressions() {
+        let mut calculator = StateCalculator::new();
+        let result = calculator.process_input("2 + 3").unwrap();
+        assert_eq!(result, Some(5.0));
+        assert_eq!(calculator.results_history.len(), 1);
+        assert_eq!(calculator.variables["ans"], 5.0);
+    }
+
+    #[test]
+    fn standard_mode_handles_variable_assignment() {
+        let mut calculator = StateCalculator::new();
+        assert_eq!(calculator.process_input("x = 5").unwrap(), Some(5.0));
+        assert_eq!(calculator.variables["x"], 5.0);
+        assert_eq!(calculator.process_input("x + 1").unwrap(), Some(6.0));
+    }
+
+    #[test]
+    fn standard_mode_uses_variables_in_expressions() {
+        let mut calculator = StateCalculator::new();
+        calculator.variables.insert("x".to_string(), 10.0);
+        assert_eq!(calculator.process_input("x * 2").unwrap(), Some(20.0));
+    }
+
+    #[test]
+    fn standard_mode_returns_error_for_undefined_variable() {
+        let mut calculator = StateCalculator::new();
+        assert!(calculator.process_input("unknown + 1").is_err());
+    }
+
+    #[test]
+    fn switch_to_scientific_mode() {
+        let mut calculator = StateCalculator::new();
+        calculator.process_input("mode scientific").unwrap();
+        assert_eq!(calculator.state.name(), "Scientific");
+        assert!(calculator.display_prompt().contains("(RAD)"));
+    }
+
+    #[test]
+    fn scientific_mode_evaluates_expression() {
+        let mut calculator = StateCalculator::new();
+        calculator.process_input("mode scientific").unwrap();
+        let result = calculator.process_input("sin ( 1 )").unwrap().unwrap();
+        assert!((result - 1.0_f64.sin()).abs() < 1e-10);
+    }
+
+    #[test]
+    fn switch_to_programmer_mode() {
+        let mut calculator = StateCalculator::new();
+        calculator.process_input("mode programmer").unwrap();
+        assert_eq!(calculator.state.name(), "Programmer");
+    }
+
+    #[test]
+    fn programmer_mode_sets_number_base() {
+        let mut calculator = StateCalculator::new();
+        calculator.process_input("mode programmer").unwrap();
+        calculator.process_input("base hex").unwrap();
+        assert!(calculator.display_prompt().contains("(HEX)"));
+    }
+
+    #[test]
+    fn switching_between_modes() {
+        let mut calculator = StateCalculator::new();
+        calculator.process_input("mode scientific").unwrap();
+        calculator.process_input("angle deg").unwrap();
+        assert!(calculator.display_prompt().contains("(DEG)"));
+        calculator.process_input("mode standard").unwrap();
+        assert_eq!(calculator.display_prompt(), "[Standard] >");
+        calculator.process_input("mode programmer").unwrap();
+        assert!(calculator.display_prompt().contains("(DEC)"));
+    }
+
+    #[test]
+    fn unknown_mode_returns_error() {
+        let mut calculator = StateCalculator::new();
+        assert!(calculator.process_input("mode quantum").is_err());
+    }
+
+    #[test]
+    fn store_result_sets_ans_variable() {
+        let mut calculator = StateCalculator::new();
+        calculator.store_result("2 + 3".to_string(), 5.0);
+        assert_eq!(calculator.variables["ans"], 5.0);
+        assert_eq!(calculator.results_history.len(), 1);
+    }
+
+    // ---------- StandardMode ----------
+
+    #[test]
+    fn standard_mode_handle_input_direct() {
+        let mode = StandardMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("2 + 3", &mut calculator).unwrap(), Some(5.0));
+    }
+
+    #[test]
+    fn standard_mode_helper_reports_operations() {
+        let mode = StandardMode::new();
+        assert_eq!(mode.available_operations(), vec!["+", "-", "*", "/", "^"]);
+    }
+
+    // ---------- ScientificMode ----------
+
+    #[test]
+    fn scientific_mode_trig_in_radians() {
+        let mode = ScientificMode::new();
+        let mut calculator = StateCalculator::new();
+        let result = mode.handle_input("cos 0", &mut calculator).unwrap().unwrap();
+        assert!((result - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn scientific_mode_trig_in_degrees() {
+        let mode = ScientificMode {
+            sci_ops: Box::new(StandardScientificOperations {
+                angle_mode: AngleMode::Degrees,
+            }),
+            angle_mode: AngleMode::Degrees,
+        };
+        let mut calculator = StateCalculator::new();
+        let result = mode.handle_input("sin 90", &mut calculator).unwrap().unwrap();
+        assert!((result - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn scientific_mode_log() {
+        let mode = ScientificMode::new();
+        let mut calculator = StateCalculator::new();
+        let result = mode.handle_input("log 10 100", &mut calculator).unwrap().unwrap();
+        assert!((result - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn scientific_mode_log_rejects_bad_arguments() {
+        let mode = ScientificMode::new();
+        let mut calculator = StateCalculator::new();
+        assert!(mode.handle_input("log 10 -5", &mut calculator).is_err());
+        assert!(mode.handle_input("log 1 10", &mut calculator).is_err());
+    }
+
+    #[test]
+    fn scientific_mode_change_angle_via_command() {
+        let mode = ScientificMode::new();
+        let mut calculator = StateCalculator::new();
+        mode.handle_input("angle deg", &mut calculator).unwrap();
+        assert!(calculator.display_prompt().contains("(DEG)"));
+    }
+
+    // ---------- ProgrammerMode ----------
+
+    #[test]
+    fn programmer_mode_bitwise_and() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("AND 5 3", &mut calculator).unwrap(), Some(1.0));
+    }
+
+    #[test]
+    fn programmer_mode_bitwise_or() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("OR 5 3", &mut calculator).unwrap(), Some(7.0));
+    }
+
+    #[test]
+    fn programmer_mode_bitwise_xor() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("XOR 5 3", &mut calculator).unwrap(), Some(6.0));
+    }
+
+    #[test]
+    fn programmer_mode_bitwise_not() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("NOT 0", &mut calculator).unwrap(), Some(-1.0));
+    }
+
+    #[test]
+    fn programmer_mode_shift_left() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("SHL 1 3", &mut calculator).unwrap(), Some(8.0));
+    }
+
+    #[test]
+    fn programmer_mode_shift_right() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        assert_eq!(mode.handle_input("SHR 8 2", &mut calculator).unwrap(), Some(2.0));
+    }
+
+    #[test]
+    fn programmer_mode_change_base() {
+        let mode = ProgrammerMode::new();
+        let mut calculator = StateCalculator::new();
+        mode.handle_input("base bin", &mut calculator).unwrap();
+        assert_eq!(calculator.state.name(), "Programmer");
+        assert!(calculator.display_prompt().contains("(BIN)"));
+    }
+
+    #[test]
+    fn programmer_mode_available_operations() {
+        let mode = ProgrammerMode::new();
+        assert_eq!(
+            mode.available_operations(),
+            vec!["+", "-", "*", "/", "AND", "OR", "XOR", "NOT", "SHL", "SHR"]
+        );
+    }
+
+    // ---------- NumberBase ----------
+
+    #[test]
+    fn number_base_formats_decimal() {
+        assert_eq!(NumberBase::Decimal.format(42.0), "42");
+    }
+
+    #[test]
+    fn number_base_parses() {
+        assert_eq!(NumberBase::Binary.parse("0b101").unwrap(), 5.0);
+        assert_eq!(NumberBase::Octal.parse("0o10").unwrap(), 8.0);
+        assert_eq!(NumberBase::Decimal.parse("42").unwrap(), 42.0);
+        assert_eq!(NumberBase::Hexadecimal.parse("0xFF").unwrap(), 255.0);
+    }
+
+    #[test]
+    fn number_base_parsing_requires_prefix() {
+        assert!(NumberBase::Binary.parse("101").is_err());
+        assert!(NumberBase::Octal.parse("10").is_err());
+        assert!(NumberBase::Hexadecimal.parse("FF").is_err());
+    }
+
+    #[test]
+    fn number_base_parsing_rejects_invalid() {
+        assert!(NumberBase::Binary.parse("0b").is_err());
+        assert!(NumberBase::Hexadecimal.parse("0xG").is_err());
+        assert!(NumberBase::Decimal.parse("abc").is_err());
+    }
+
+    #[test]
+    fn number_base_formats_non_decimal() {
+        assert_eq!(NumberBase::Binary.format(5.0), "0b101");
+        assert_eq!(NumberBase::Octal.format(8.0), "0o10");
+        assert_eq!(NumberBase::Hexadecimal.format(255.0), "0xFF");
+    }
+
+    #[test]
+    fn number_base_truncates_fractional_values() {
+        assert_eq!(NumberBase::Binary.format(5.9), "0b101");
+    }
+}

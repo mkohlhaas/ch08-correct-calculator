@@ -428,3 +428,192 @@ pub fn validate_expression(expr: &dyn Expression) -> Result<(), String> {
     let mut visitor = ValidationVisitor::new();
     visitor.validate(expr)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expression::{Expression, NumberExpression, VariableExpression};
+    use crate::parser::ExpressionParser;
+    use std::collections::HashMap;
+
+    fn parse(expression: &str) -> Box<dyn Expression> {
+        ExpressionParser::new().parse(expression).unwrap()
+    }
+
+    // ---------- optimize_expression ----------
+
+    #[test]
+    fn optimize_folds_constant_expressions() {
+        let expression = parse("2 + 3");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+
+        assert!(
+            optimized
+                .as_any()
+                .downcast_ref::<NumberExpression>()
+                .is_some()
+        );
+        assert_eq!(optimized.evaluate(&HashMap::new()).unwrap(), 5.0);
+    }
+
+    #[test]
+    fn optimize_substitutes_known_variables() {
+        let expression = parse("x + 1");
+        let variables = HashMap::from([("x".to_string(), 10.0)]);
+        let optimized = optimize_expression(&*expression, &variables).unwrap();
+
+        assert_eq!(optimized.evaluate(&HashMap::new()).unwrap(), 11.0);
+    }
+
+    #[test]
+    fn optimize_keeps_unknown_variables() {
+        let expression = parse("x + y");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+
+        let variables = HashMap::from([("x".to_string(), 1.0), ("y".to_string(), 2.0)]);
+        assert_eq!(optimized.evaluate(&variables).unwrap(), 3.0);
+    }
+
+    #[test]
+    fn optimize_identity_add_zero() {
+        let expression = parse("x + 0");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+
+        assert!(
+            optimized
+                .as_any()
+                .downcast_ref::<VariableExpression>()
+                .is_some()
+        );
+        let variables = HashMap::from([("x".to_string(), 7.0)]);
+        assert_eq!(optimized.evaluate(&variables).unwrap(), 7.0);
+    }
+
+    #[test]
+    fn optimize_multiply_by_zero() {
+        let expression = parse("5 * 0");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+        assert_eq!(optimized.evaluate(&HashMap::new()).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn optimize_multiply_by_one() {
+        let expression = parse("x * 1");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+
+        assert!(
+            optimized
+                .as_any()
+                .downcast_ref::<VariableExpression>()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn optimize_power_to_zero() {
+        let expression = parse("x ^ 0");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+        assert_eq!(optimized.evaluate(&HashMap::new()).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn optimize_constant_function_call() {
+        let expression = parse("sqrt ( 4 )");
+        let optimized = optimize_expression(&*expression, &HashMap::new()).unwrap();
+        assert_eq!(optimized.evaluate(&HashMap::new()).unwrap(), 2.0);
+    }
+
+    #[test]
+    fn optimize_division_by_zero_errors() {
+        let expression = parse("5 / 0");
+        assert!(optimize_expression(&*expression, &HashMap::new()).is_err());
+    }
+
+    // ---------- validate_expression ----------
+
+    #[test]
+    fn validate_accepts_valid_expression() {
+        let expression = parse("2 + 3");
+        assert!(validate_expression(&*expression).is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_variables() {
+        let expression = parse("x * 2");
+        assert!(validate_expression(&*expression).is_ok());
+    }
+
+    #[test]
+    fn validate_detects_division_by_zero() {
+        let expression = parse("2 / 0");
+        assert!(validate_expression(&*expression).is_err());
+    }
+
+    #[test]
+    fn validate_detects_sqrt_of_negative_constant() {
+        let expression = FunctionCall::new(
+            Function::Sqrt,
+            Box::new(NumberExpression::new(-4.0)),
+        );
+        match validate_expression(&expression as &dyn Expression) {
+            Err(message) => assert!(message.contains("square root")),
+            Ok(()) => panic!("expected validation error"),
+        }
+    }
+
+    #[test]
+    fn validate_detects_tangent_undefined() {
+        let expression = FunctionCall::new(
+            Function::Tan,
+            Box::new(NumberExpression::new(std::f64::consts::PI / 2.0)),
+        );
+        assert!(validate_expression(&expression as &dyn Expression).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_valid_sqrt() {
+        let expression = FunctionCall::new(
+            Function::Sqrt,
+            Box::new(NumberExpression::new(4.0)),
+        );
+        assert!(validate_expression(&expression as &dyn Expression).is_ok());
+    }
+
+    // ---------- Visitable accept() ----------
+
+    #[test]
+    fn accept_dispatches_to_number_visit() {
+        let number = NumberExpression::new(1.0);
+        let mut visitor = ValidationVisitor::new();
+        assert!(number.accept(&mut visitor).is_ok());
+        assert!(visitor.errors.is_empty());
+    }
+
+    #[test]
+    fn accept_dispatches_to_function_call_visit() {
+        let function = FunctionCall::new(
+            Function::Sqrt,
+            Box::new(NumberExpression::new(-1.0)),
+        );
+        let mut visitor = ValidationVisitor::new();
+        assert!(function.accept(&mut visitor).is_ok());
+        assert_eq!(visitor.errors.len(), 1);
+    }
+
+    // ---------- OptimizationVisitor ----------
+
+    #[test]
+    fn optimization_visitor_reports_none_before_running() {
+        let visitor = OptimizationVisitor::new(HashMap::new());
+        assert!(visitor.optimized_expression.is_none());
+    }
+
+    #[test]
+    fn optimization_visitor_is_reusable() {
+        let mut visitor = OptimizationVisitor::new(HashMap::new());
+        let a = visitor.optimize(&*parse("1 + 2")).unwrap();
+        let b = visitor.optimize(&*parse("3 * 4")).unwrap();
+        assert_eq!(a.evaluate(&HashMap::new()).unwrap(), 3.0);
+        assert_eq!(b.evaluate(&HashMap::new()).unwrap(), 12.0);
+    }
+}
