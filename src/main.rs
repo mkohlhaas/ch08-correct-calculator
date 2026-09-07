@@ -28,7 +28,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use bridge::ConsoleDisplay;
-use chain::{create_input_chain, InputHandler};
+use chain::{InputHandler, create_input_chain};
 use command::{Calculation, ClearVariablesCommand, CommandProcessor, SetVariableCommand};
 
 use memento::{
@@ -404,8 +404,42 @@ impl VariableProvider for CorrectCalculator {
     }
 }
 
-// Demonstrate pattern integration
+// Entry point: select which pattern to run
 fn main() {
+    loop {
+        println!("\n=== Correct Calculator - Design Patterns Application ===");
+        println!("1. Full Calculator (all patterns combined)");
+        println!("2. State Pattern Demo");
+        println!("3. Memento Pattern Demo");
+        println!("4. Observer Pattern Demo");
+        println!("5. Visitor Pattern Demo");
+        println!("0. Exit");
+        print!("Select an option: ");
+        io::stdout().flush().unwrap();
+
+        let mut choice = String::new();
+        if io::stdin().read_line(&mut choice).is_err() {
+            println!("Error reading input, please try again");
+            continue;
+        }
+
+        match choice.trim() {
+            "1" => run_with_full_calculator(),
+            "2" => run_with_state(),
+            "3" => run_with_memento(),
+            "4" => run_with_observer(),
+            "5" => run_with_visitor(),
+            "0" | "exit" | "quit" => {
+                println!("Goodbye!");
+                break;
+            }
+            _ => println!("Unknown option, please try again"),
+        }
+    }
+}
+
+// Example using the full calculator with all patterns
+fn run_with_full_calculator() {
     let mut calculator = CorrectCalculator::new();
     calculator.run();
 }
