@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use bridge::ConsoleDisplay;
 use chain::create_input_chain;
 use command::{ClearVariablesCommand, CommandProcessor, SetVariableCommand};
-use iterator::HistoryIterator;
+
 use memento::{
     CalculatorMemento, CalculatorStateManager, MementoOriginator, get_angle_mode,
     get_calculator_state_type, get_number_base,
@@ -262,7 +262,7 @@ impl CorrectCalculator {
                     println!("No calculation history");
                 } else {
                     println!("Calculation history:");
-                    for (i, calc) in HistoryIterator::new(&history).enumerate() {
+                    for (i, calc) in history.iter().enumerate() {
                         println!("  {}. {} = {}", i + 1, calc.expression, calc.result);
                     }
                 }

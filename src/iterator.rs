@@ -2,7 +2,6 @@
 
 // Several iterators for history, reverse history and variables
 
-use crate::command::Calculation;
 use crate::expression::{
     BinaryOperation, Expression, FunctionCall, NumberExpression, VariableExpression,
 };
@@ -12,72 +11,20 @@ use std::collections::HashMap;
 // A. History Iterator //
 // =================== //
 
-// see cargo project `iterator-pattern` for an alternative implementation
-
-// History iterator that provides access to past results
-pub struct HistoryIterator<'a> {
-    history: &'a [Calculation],
-    position: usize,
-}
-
-impl<'a> HistoryIterator<'a> {
-    pub fn new(history: &'a [Calculation]) -> Self {
-        Self {
-            history,
-            position: 0,
-        }
-    }
-}
-
-impl<'a> Iterator for HistoryIterator<'a> {
-    type Item = &'a Calculation;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.position < self.history.len() {
-            let item = &self.history[self.position];
-            self.position += 1;
-            Some(item)
-        } else {
-            None
-        }
-    }
-}
+// Since slices already implement Iterator in Rust, HistoryIterator is redundant. You can replace it with slice.iter().
+// see cargo project `iterator-pattern`
 
 // =========================== //
 // B. Reverse History Iterator //
 // =========================== //
 
-// A reverse iterator for the history
-pub struct ReverseHistoryIterator<'a> {
-    history: &'a [Calculation],
-    position: usize,
-}
+// NOTE: HistoryIterator and ReverseHistoryIterator were removed because slices
+// natively support iteration via slice.iter() and reverse iteration via
+// slice.iter().rev().
 
-impl<'a> ReverseHistoryIterator<'a> {
-    pub fn new(history: &'a [Calculation]) -> Self {
-        Self {
-            history,
-            position: history.len(),
-        }
-    }
-}
-
-impl<'a> Iterator for ReverseHistoryIterator<'a> {
-    type Item = &'a Calculation;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.position > 0 {
-            self.position -= 1;
-            Some(&self.history[self.position])
-        } else {
-            None
-        }
-    }
-}
-
-// ===================== //
-// C. Variables Iterator //
-// ===================== //
+// =========================== //
+// C. Variables Iterator      //
+// =========================== //
 
 // Variables map iterator
 pub struct VariablesIterator<'a> {
