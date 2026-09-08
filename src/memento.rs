@@ -1,5 +1,10 @@
 // memento.rs - Memento pattern implementation for saving/restoring calculator state
 
+// We'll implement this pattern in three parts:
+// 1. Memento:    Defining the memento that captures calculator state,
+// 2. Originator: Modifying the calculator to create and restore from mementos,
+// 3. Caretaker:  Building a caretaker that manages memento history.
+
 use crate::command::Calculation;
 use crate::config::AngleMode;
 use crate::state::{CalculatorState, NumberBase, ProgrammerMode, ScientificMode, StandardMode};
