@@ -1,107 +1,11 @@
 // visitor.rs - Visitor pattern implementation for traversing and transforming expressions
 
-// This is not a proper implementation or rather application of the Visitor pattern.
-// The function `accept(...)` is never called!
-// Normally you would call `accept` from the Visitable (NumberExpression, VariableExpression,
-// BinaryOperation, FunctionCall)
-// You can comment out the Visitable trait and its implementation because it's completly unused.
-
 use crate::expression::{
-    BinaryOperation, Expression, FunctionCall, NumberExpression, VariableExpression,
+    BinaryOperation, Expression, ExpressionVisitor, FunctionCall, NumberExpression,
+    VariableExpression,
 };
 use crate::token::{Function, Operator};
-use std::any::Any;
 use std::collections::HashMap;
-
-// ========================================== //
-// 1. Define the Visitor and Visitable Traits //
-// ========================================== //
-
-// Visitor interface for expression operations
-pub trait ExpressionVisitor {
-    fn visit_number(&mut self, expr: &NumberExpression) -> Result<(), String>;
-    fn visit_variable(&mut self, expr: &VariableExpression) -> Result<(), String>;
-    fn visit_binary_op(&mut self, expr: &BinaryOperation) -> Result<(), String>;
-    fn visit_function_call(&mut self, expr: &FunctionCall) -> Result<(), String>;
-}
-
-// ============================================================ //
-// 2. The Visitable trait defines the entry point for a visitor //
-// ============================================================ //
-
-// Visitable is an Expression.
-
-// Visitable interface for expressions
-pub trait Visitable: Send + Sync {
-    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<(), String>;
-
-    // Allow downcasting from trait object
-    // Not used! (Already defined in expression.rs!)
-    fn as_any(&self) -> &dyn Any;
-}
-
-// ================================ //
-// 3. Implement Concrete Data Types //
-// ================================ //
-
-// ------------------- //
-// A. NumberExpression //
-// ------------------- //
-
-// Implementation of Visitable for each expression type
-impl Visitable for NumberExpression {
-    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<(), String> {
-        visitor.visit_number(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// --------------------- //
-// B. VariableExpression //
-// --------------------- //
-
-impl Visitable for VariableExpression {
-    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<(), String> {
-        visitor.visit_variable(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// ------------------ //
-// C. BinaryOperation //
-// ------------------ //
-
-impl Visitable for BinaryOperation {
-    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<(), String> {
-        // First visit this node
-        visitor.visit_binary_op(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// --------------- //
-// D. FunctionCall //
-// --------------- //
-
-impl Visitable for FunctionCall {
-    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<(), String> {
-        // Visit this node
-        visitor.visit_function_call(self)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
 
 // ================================ //
 // 4. Implement a Concrete Visitors //
@@ -114,34 +18,15 @@ impl Visitable for FunctionCall {
 // Concrete visitor for optimizing expressions
 pub struct OptimizationVisitor {
     variables: HashMap<String, f64>,
-    pub optimized_expression: Option<Box<dyn Expression>>,
 }
 
 impl OptimizationVisitor {
     pub fn new(variables: HashMap<String, f64>) -> Self {
-        Self {
-            variables,
-            optimized_expression: None,
-        }
+        Self { variables }
     }
 
     pub fn optimize(&mut self, expr: &dyn Expression) -> Result<Box<dyn Expression>, String> {
-        if let Some(num) = expr.as_any().downcast_ref::<NumberExpression>() {
-            self.visit_number(num)?;
-        } else if let Some(var) = expr.as_any().downcast_ref::<VariableExpression>() {
-            self.visit_variable(var)?;
-        } else if let Some(op) = expr.as_any().downcast_ref::<BinaryOperation>() {
-            self.visit_binary_op(op)?;
-        } else if let Some(func) = expr.as_any().downcast_ref::<FunctionCall>() {
-            self.visit_function_call(func)?;
-        } else {
-            return Ok(expr.clone_box());
-        }
-
-        match &self.optimized_expression {
-            Some(optimized) => Ok(optimized.clone_box()),
-            None => Ok(expr.clone_box()),
-        }
+        expr.accept(self)
     }
 
     fn get_constant_value(&self, expr: &dyn Expression) -> Option<f64> {
@@ -149,39 +34,33 @@ impl OptimizationVisitor {
             .downcast_ref::<NumberExpression>()
             .map(|num_expr| num_expr.value)
     }
-
-    fn optimize_subexpression(
-        &mut self,
-        expr: &dyn Expression,
-    ) -> Result<Box<dyn Expression>, String> {
-        let saved = self.optimized_expression.take();
-        let result = self.optimize(expr)?;
-        self.optimized_expression = saved;
-        Ok(result)
-    }
 }
 
 impl ExpressionVisitor for OptimizationVisitor {
-    fn visit_number(&mut self, expr: &NumberExpression) -> Result<(), String> {
+    fn visit_number(&mut self, expr: &NumberExpression) -> Result<Box<dyn Expression>, String> {
         // Numbers are already optimized
-        self.optimized_expression = Some(Box::new(expr.clone()));
-        Ok(())
+        Ok(expr.clone_box())
     }
 
-    fn visit_variable(&mut self, expr: &VariableExpression) -> Result<(), String> {
+    fn visit_variable(
+        &mut self,
+        expr: &VariableExpression,
+    ) -> Result<Box<dyn Expression>, String> {
         // If the variable has a known constant value, replace with a number
         if let Some(value) = self.variables.get(&expr.name) {
-            self.optimized_expression = Some(Box::new(NumberExpression::new(*value)));
+            Ok(Box::new(NumberExpression::new(*value)))
         } else {
-            self.optimized_expression = Some(Box::new(expr.clone()));
+            Ok(expr.clone_box())
         }
-        Ok(())
     }
 
-    fn visit_binary_op(&mut self, expr: &BinaryOperation) -> Result<(), String> {
+    fn visit_binary_op(
+        &mut self,
+        expr: &BinaryOperation,
+    ) -> Result<Box<dyn Expression>, String> {
         // Optimize left and right subexpressions
-        let left_opt = self.optimize_subexpression(&*expr.left)?;
-        let right_opt = self.optimize_subexpression(&*expr.right)?;
+        let left_opt = expr.left.accept(self)?;
+        let right_opt = expr.right.accept(self)?;
 
         // If both operands are constants, evaluate them
         if let (Some(left_val), Some(right_val)) = (
@@ -201,94 +80,82 @@ impl ExpressionVisitor for OptimizationVisitor {
                 Operator::Power => left_val.powf(right_val),
             };
 
-            self.optimized_expression = Some(Box::new(NumberExpression::new(result)));
+            Ok(Box::new(NumberExpression::new(result)))
         } else {
             // Some special cases for further optimization
             match expr.operator {
                 Operator::Multiply => {
                     // Multiply by 0 = 0
                     if let Some(0.0) = self.get_constant_value(&*left_opt) {
-                        self.optimized_expression = Some(Box::new(NumberExpression::new(0.0)));
-                        return Ok(());
+                        return Ok(Box::new(NumberExpression::new(0.0)));
                     }
                     if let Some(0.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(Box::new(NumberExpression::new(0.0)));
-                        return Ok(());
+                        return Ok(Box::new(NumberExpression::new(0.0)));
                     }
-
                     // Multiply by 1 = other operand
                     if let Some(1.0) = self.get_constant_value(&*left_opt) {
-                        self.optimized_expression = Some(right_opt);
-                        return Ok(());
+                        return Ok(right_opt);
                     }
                     if let Some(1.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(left_opt);
-                        return Ok(());
+                        return Ok(left_opt);
                     }
                 }
                 Operator::Add => {
                     // Add 0 = other operand
                     if let Some(0.0) = self.get_constant_value(&*left_opt) {
-                        self.optimized_expression = Some(right_opt);
-                        return Ok(());
+                        return Ok(right_opt);
                     }
                     if let Some(0.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(left_opt);
-                        return Ok(());
+                        return Ok(left_opt);
                     }
                 }
                 Operator::Subtract => {
                     // Subtract 0 = left operand
                     if let Some(0.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(left_opt);
-                        return Ok(());
+                        return Ok(left_opt);
                     }
                 }
                 Operator::Divide => {
                     // Divide by 1 = left operand
                     if let Some(1.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(left_opt);
-                        return Ok(());
+                        return Ok(left_opt);
                     }
                     // Divide 0 by anything = 0
                     if let Some(0.0) = self.get_constant_value(&*left_opt) {
-                        self.optimized_expression = Some(Box::new(NumberExpression::new(0.0)));
-                        return Ok(());
+                        return Ok(Box::new(NumberExpression::new(0.0)));
                     }
                 }
                 Operator::Power => {
                     // Anything^0 = 1
                     if let Some(0.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(Box::new(NumberExpression::new(1.0)));
-                        return Ok(());
+                        return Ok(Box::new(NumberExpression::new(1.0)));
                     }
                     // Anything^1 = itself
                     if let Some(1.0) = self.get_constant_value(&*right_opt) {
-                        self.optimized_expression = Some(left_opt);
-                        return Ok(());
+                        return Ok(left_opt);
                     }
                     // 1^anything = 1
                     if let Some(1.0) = self.get_constant_value(&*left_opt) {
-                        self.optimized_expression = Some(Box::new(NumberExpression::new(1.0)));
-                        return Ok(());
+                        return Ok(Box::new(NumberExpression::new(1.0)));
                     }
                 }
             }
 
             // Cannot fully optimize, create a new operation with optimized operands
-            self.optimized_expression = Some(Box::new(BinaryOperation::new(
+            Ok(Box::new(BinaryOperation::new(
                 left_opt,
                 right_opt,
                 expr.operator.clone(),
-            )));
+            )))
         }
-
-        Ok(())
     }
 
-    fn visit_function_call(&mut self, expr: &FunctionCall) -> Result<(), String> {
+    fn visit_function_call(
+        &mut self,
+        expr: &FunctionCall,
+    ) -> Result<Box<dyn Expression>, String> {
         // Optimize the argument
-        let arg_opt = self.optimize_subexpression(&*expr.argument)?;
+        let arg_opt = expr.argument.accept(self)?;
 
         // If the argument is a constant, evaluate the function
         if let Some(arg_val) = self.get_constant_value(&*arg_opt) {
@@ -309,14 +176,11 @@ impl ExpressionVisitor for OptimizationVisitor {
                 }
             };
 
-            self.optimized_expression = Some(Box::new(NumberExpression::new(result)));
+            Ok(Box::new(NumberExpression::new(result)))
         } else {
             // Cannot optimize, create a new function call with optimized argument
-            self.optimized_expression =
-                Some(Box::new(FunctionCall::new(expr.function.clone(), arg_opt)));
+            Ok(Box::new(FunctionCall::new(expr.function.clone(), arg_opt)))
         }
-
-        Ok(())
     }
 }
 
@@ -335,22 +199,7 @@ impl ValidationVisitor {
     }
 
     pub fn validate(&mut self, expr: &dyn Expression) -> Result<(), String> {
-        if let Some(num) = expr.as_any().downcast_ref::<NumberExpression>() {
-            self.visit_number(num)?;
-        } else if let Some(var) = expr.as_any().downcast_ref::<VariableExpression>() {
-            self.visit_variable(var)?;
-        } else if let Some(op) = expr.as_any().downcast_ref::<BinaryOperation>() {
-            self.visit_binary_op(op)?;
-
-            // Validate operands
-            self.validate(&*op.left)?;
-            self.validate(&*op.right)?;
-        } else if let Some(func) = expr.as_any().downcast_ref::<FunctionCall>() {
-            self.visit_function_call(func)?;
-
-            // Validate argument
-            self.validate(&*func.argument)?;
-        }
+        expr.accept(self)?;
 
         if self.errors.is_empty() {
             Ok(())
@@ -361,17 +210,23 @@ impl ValidationVisitor {
 }
 
 impl ExpressionVisitor for ValidationVisitor {
-    fn visit_number(&mut self, _expr: &NumberExpression) -> Result<(), String> {
+    fn visit_number(&mut self, expr: &NumberExpression) -> Result<Box<dyn Expression>, String> {
         // Numbers are always valid
-        Ok(())
+        Ok(expr.clone_box())
     }
 
-    fn visit_variable(&mut self, _expr: &VariableExpression) -> Result<(), String> {
+    fn visit_variable(
+        &mut self,
+        expr: &VariableExpression,
+    ) -> Result<Box<dyn Expression>, String> {
         // Variables are assumed to be valid (could add name validation here)
-        Ok(())
+        Ok(expr.clone_box())
     }
 
-    fn visit_binary_op(&mut self, expr: &BinaryOperation) -> Result<(), String> {
+    fn visit_binary_op(
+        &mut self,
+        expr: &BinaryOperation,
+    ) -> Result<Box<dyn Expression>, String> {
         // Check for division by zero in constant expressions
         if let Operator::Divide = expr.operator
             && let Some(right) = expr.right.as_any().downcast_ref::<NumberExpression>()
@@ -380,10 +235,17 @@ impl ExpressionVisitor for ValidationVisitor {
             self.errors.push("Division by zero".to_string());
         }
 
-        Ok(())
+        // Validate operands
+        expr.left.accept(self)?;
+        expr.right.accept(self)?;
+
+        Ok(expr.clone_box())
     }
 
-    fn visit_function_call(&mut self, expr: &FunctionCall) -> Result<(), String> {
+    fn visit_function_call(
+        &mut self,
+        expr: &FunctionCall,
+    ) -> Result<Box<dyn Expression>, String> {
         // Validate function arguments
         match expr.function {
             Function::Sqrt => {
@@ -406,7 +268,10 @@ impl ExpressionVisitor for ValidationVisitor {
             _ => {}
         }
 
-        Ok(())
+        // Validate argument
+        expr.argument.accept(self)?;
+
+        Ok(expr.clone_box())
     }
 }
 
@@ -579,7 +444,7 @@ mod tests {
         assert!(validate_expression(&expression as &dyn Expression).is_ok());
     }
 
-    // ---------- Visitable accept() ----------
+    // ---------- accept() double dispatch ----------
 
     #[test]
     fn accept_dispatches_to_number_visit() {
@@ -601,12 +466,6 @@ mod tests {
     }
 
     // ---------- OptimizationVisitor ----------
-
-    #[test]
-    fn optimization_visitor_reports_none_before_running() {
-        let visitor = OptimizationVisitor::new(HashMap::new());
-        assert!(visitor.optimized_expression.is_none());
-    }
 
     #[test]
     fn optimization_visitor_is_reusable() {

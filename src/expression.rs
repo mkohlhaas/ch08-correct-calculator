@@ -15,7 +15,6 @@ pub trait Expression: Send + Sync {
     }
 
     // Allow downcasting for visitor pattern
-    // This is also/already defined in the Visitable trait.
     fn as_any(&self) -> &dyn Any;
 
     // Typed downcast helpers built on as_any() so they dispatch correctly
@@ -45,8 +44,19 @@ pub trait Expression: Send + Sync {
         self.as_function().is_some()
     }
 
+    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<Box<dyn Expression>, String>;
+
     // Default implementation for cloning
     fn clone_box(&self) -> Box<dyn Expression>;
+}
+
+// Visitor interface for the Visitor pattern (double dispatch).
+// Defined here alongside Expression so accept() can reference it without a module cycle.
+pub trait ExpressionVisitor {
+    fn visit_number(&mut self, expr: &NumberExpression) -> Result<Box<dyn Expression>, String>;
+    fn visit_variable(&mut self, expr: &VariableExpression) -> Result<Box<dyn Expression>, String>;
+    fn visit_binary_op(&mut self, expr: &BinaryOperation) -> Result<Box<dyn Expression>, String>;
+    fn visit_function_call(&mut self, expr: &FunctionCall) -> Result<Box<dyn Expression>, String>;
 }
 
 // Extension to allow cloning of trait objects
@@ -90,6 +100,10 @@ impl Expression for NumberExpression {
         self
     }
 
+    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<Box<dyn Expression>, String> {
+        visitor.visit_number(self)
+    }
+
     fn clone_box(&self) -> Box<dyn Expression> {
         Box::new(self.clone())
     }
@@ -121,6 +135,10 @@ impl Expression for VariableExpression {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<Box<dyn Expression>, String> {
+        visitor.visit_variable(self)
     }
 
     fn clone_box(&self) -> Box<dyn Expression> {
@@ -224,6 +242,10 @@ impl Expression for BinaryOperation {
         self
     }
 
+    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<Box<dyn Expression>, String> {
+        visitor.visit_binary_op(self)
+    }
+
     fn clone_box(&self) -> Box<dyn Expression> {
         Box::new(self.clone())
     }
@@ -301,6 +323,10 @@ impl Expression for FunctionCall {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn accept(&self, visitor: &mut dyn ExpressionVisitor) -> Result<Box<dyn Expression>, String> {
+        visitor.visit_function_call(self)
     }
 
     fn clone_box(&self) -> Box<dyn Expression> {
