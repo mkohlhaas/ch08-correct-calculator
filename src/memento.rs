@@ -37,28 +37,6 @@ pub trait MementoOriginator {
     fn restore_from_memento(&mut self, memento: &CalculatorMemento) -> Result<(), String>;
 }
 
-// Command for saving state
-// pub struct SaveStateCommand {
-//     pub name: String,
-// }
-
-// impl SaveStateCommand {
-//     pub fn new(name: impl Into<String>) -> Self {
-//         Self { name: name.into() }
-//     }
-// }
-
-// Command for restoring state
-// pub struct RestoreStateCommand {
-//     pub name: String,
-// }
-
-// impl RestoreStateCommand {
-//     pub fn new(name: impl Into<String>) -> Self {
-//         Self { name: name.into() }
-//     }
-// }
-
 // ================================== //
 // 3. Caretaker that manages mementos //
 // ================================== //
