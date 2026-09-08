@@ -30,11 +30,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 
 use calculator::CorrectCalculator;
-use command::Calculation;
-use memento::{
-    CalculatorMemento, CalculatorStateManager, create_state_from_memento, get_angle_mode,
-    get_calculator_state_type, get_number_base,
-};
+
 use observer::{CalculatorEvent, LoggerObserver, ObservableCalculator, Subject};
 use parser::ExpressionParser;
 use state::StateCalculator;
@@ -46,10 +42,9 @@ fn main() {
         println!("\n=== Correct Calculator - Design Patterns Application ===");
         println!("1. Full Calculator (all patterns combined)");
         println!("2. State Pattern Demo");
-        println!("3. Memento Pattern Demo");
-        println!("4. Observer Pattern Demo");
-        println!("5. Visitor Pattern Demo");
-        println!("0. Exit");
+        println!("3. Observer Pattern Demo");
+        println!("4. Visitor Pattern Demo");
+        println!("5. Exit");
         print!("Select an option: ");
         io::stdout().flush().unwrap();
 
@@ -62,10 +57,9 @@ fn main() {
         match choice.trim() {
             "1" => run_with_full_calculator(),
             "2" => run_with_state(),
-            "3" => run_with_memento(),
-            "4" => run_with_observer(),
-            "5" => run_with_visitor(),
-            "0" | "exit" | "quit" => {
+            "3" => run_with_observer(),
+            "4" => run_with_visitor(),
+            "5" | "exit" | "quit" => {
                 println!("Goodbye!");
                 break;
             }
@@ -99,81 +93,6 @@ fn run_with_state() {
         let input = input.trim();
         if input == "/exit" {
             break;
-        }
-
-        match calculator.process_input(input) {
-            Ok(Some(result)) => println!("= {}", result),
-            Ok(None) => {} // Command executed with no result to display
-            Err(error) => println!("Error: {}", error),
-        }
-    }
-
-    println!("Goodbye!");
-}
-
-// Example using the Memento pattern directly
-fn run_with_memento() {
-    println!("Correct Calculator with Memento Pattern");
-
-    let mut calculator = StateCalculator::new();
-    let mut state_manager = CalculatorStateManager::new();
-
-    loop {
-        print!("{}", calculator.display_prompt());
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Error reading input, please try again");
-            continue;
-        }
-
-        let input = input.trim();
-        if input == "/exit" {
-            break;
-        }
-
-        if input.starts_with("/save ") {
-            let name = input.trim_start_matches("/save ").trim();
-            let state_type = get_calculator_state_type(&*calculator.state);
-            let angle_mode = get_angle_mode(&*calculator.state);
-            let number_base = get_number_base(&*calculator.state);
-
-            let memento = CalculatorMemento {
-                variables: calculator.variables.clone(),
-                history: calculator
-                    .results_history
-                    .clone()
-                    .into_iter()
-                    .map(|(expr, result)| Calculation {
-                        expression: expr,
-                        result,
-                        timestamp: std::time::SystemTime::now(),
-                    })
-                    .collect(),
-                mode: state_type,
-                angle_mode,
-                number_base,
-            };
-
-            state_manager.save_state(name, memento);
-            continue;
-        } else if input.starts_with("/restore ") {
-            let name = input.trim_start_matches("/restore ").trim();
-            match state_manager.restore_state(name) {
-                Ok(memento) => {
-                    calculator.variables = memento.variables.clone();
-                    calculator.results_history = memento
-                        .history
-                        .iter()
-                        .map(|calc| (calc.expression.clone(), calc.result))
-                        .collect();
-                    calculator.state = create_state_from_memento(&memento);
-                    println!("State '{}' restored", name);
-                }
-                Err(e) => println!("Error: {}", e),
-            }
-            continue;
         }
 
         match calculator.process_input(input) {
