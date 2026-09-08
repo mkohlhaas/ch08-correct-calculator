@@ -31,7 +31,6 @@ use std::io::{self, Write};
 
 use calculator::CorrectCalculator;
 
-use observer::{CalculatorEvent, LoggerObserver, ObservableCalculator, Subject};
 use parser::ExpressionParser;
 use state::StateCalculator;
 use visitor::optimize_expression;
@@ -42,9 +41,8 @@ fn main() {
         println!("\n=== Correct Calculator - Design Patterns Application ===");
         println!("1. Full Calculator (all patterns combined)");
         println!("2. State Pattern Demo");
-        println!("3. Observer Pattern Demo");
-        println!("4. Visitor Pattern Demo");
-        println!("5. Exit");
+        println!("3. Visitor Pattern Demo");
+        println!("4. Exit");
         print!("Select an option: ");
         io::stdout().flush().unwrap();
 
@@ -57,9 +55,8 @@ fn main() {
         match choice.trim() {
             "1" => run_with_full_calculator(),
             "2" => run_with_state(),
-            "3" => run_with_observer(),
-            "4" => run_with_visitor(),
-            "5" | "exit" | "quit" => {
+            "3" => run_with_visitor(),
+            "4" | "exit" | "quit" => {
                 println!("Goodbye!");
                 break;
             }
@@ -99,50 +96,6 @@ fn run_with_state() {
             Ok(Some(result)) => println!("= {}", result),
             Ok(None) => {} // Command executed with no result to display
             Err(error) => println!("Error: {}", error),
-        }
-    }
-
-    println!("Goodbye!");
-}
-
-// Example using the Observer pattern directly
-fn run_with_observer() {
-    println!("Correct Calculator with Observer Pattern");
-
-    let mut calculator = StateCalculator::new();
-    let mut observable = ObservableCalculator::new();
-
-    // Add observers
-    observable.attach(Box::new(LoggerObserver));
-
-    loop {
-        print!("{}", calculator.display_prompt());
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            println!("Error reading input, please try again");
-            continue;
-        }
-
-        let input = input.trim();
-        if input == "/exit" {
-            break;
-        }
-
-        match calculator.process_input(input) {
-            Ok(Some(result)) => {
-                println!("= {}", result);
-                observable.notify(&CalculatorEvent::ResultCalculated(
-                    result,
-                    input.to_string(),
-                ));
-            }
-            Ok(None) => {} // Command executed with no result to display
-            Err(error) => {
-                println!("Error: {}", error);
-                observable.notify(&CalculatorEvent::Error(error));
-            }
         }
     }
 
