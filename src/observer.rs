@@ -83,25 +83,27 @@ impl DisplayObserver {
 
 impl Observer for DisplayObserver {
     fn update(&self, event: &CalculatorEvent) {
+        use CalculatorEvent::*;
+
         let display = self.display.lock().unwrap();
         match event {
-            CalculatorEvent::ResultCalculated(result, expr) => {
+            ResultCalculated(result, expr) => {
                 display.show_result(*result);
                 display.show_message(&format!("Evaluated: {}", expr));
             }
-            CalculatorEvent::VariableChanged(name, value) => {
+            VariableChanged(name, value) => {
                 display.show_message(&format!("Variable {} = {}", name, value));
             }
-            CalculatorEvent::ModeChanged(mode) => {
+            ModeChanged(mode) => {
                 display.show_message(&format!("Switched to {} mode", mode));
             }
-            CalculatorEvent::Error(message) => {
+            Error(message) => {
                 display.show_error(message);
             }
-            CalculatorEvent::StateRestored => {
+            StateRestored => {
                 display.show_message("Calculator state restored");
             }
-            CalculatorEvent::HistoryAdded(_) => {
+            HistoryAdded(_) => {
                 // Do nothing for history additions
             }
         }
@@ -189,23 +191,25 @@ pub struct LoggerObserver;
 
 impl Observer for LoggerObserver {
     fn update(&self, event: &CalculatorEvent) {
+        use CalculatorEvent::*;
+
         match event {
-            CalculatorEvent::VariableChanged(name, value) => {
+            VariableChanged(name, value) => {
                 println!("[LOG] Variable changed: {} = {}", name, value);
             }
-            CalculatorEvent::ResultCalculated(result, expr) => {
+            ResultCalculated(result, expr) => {
                 println!("[LOG] Calculation: {} = {}", expr, result);
             }
-            CalculatorEvent::ModeChanged(mode) => {
+            ModeChanged(mode) => {
                 println!("[LOG] Mode changed to: {}", mode);
             }
-            CalculatorEvent::HistoryAdded(calc) => {
+            HistoryAdded(calc) => {
                 println!("[LOG] History added: {} = {}", calc.expression, calc.result);
             }
-            CalculatorEvent::StateRestored => {
+            StateRestored => {
                 println!("[LOG] State restored");
             }
-            CalculatorEvent::Error(message) => {
+            Error(message) => {
                 println!("[LOG] Error: {}", message);
             }
         }
@@ -293,6 +297,10 @@ impl Subject for ObservableCalculator {
         }
     }
 }
+
+// ===== //
+// Tests //
+// ===== //
 
 #[cfg(test)]
 mod tests {
@@ -407,11 +415,17 @@ mod tests {
 
     impl crate::bridge::Display for MockDisplay {
         fn show_result(&self, result: f64) {
-            self.messages.lock().unwrap().push(format!("result:{}", result));
+            self.messages
+                .lock()
+                .unwrap()
+                .push(format!("result:{}", result));
         }
 
         fn show_error(&self, error: &str) {
-            self.messages.lock().unwrap().push(format!("error:{}", error));
+            self.messages
+                .lock()
+                .unwrap()
+                .push(format!("error:{}", error));
         }
 
         fn show_expression(&self, expression: &dyn crate::expression::Expression) {
